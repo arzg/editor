@@ -9,35 +9,31 @@ fn main() -> io::Result<()> {
     };
     let stdout = io::stdout();
 
-    Editor::new(text, stdout.lock())?.run()?;
+    Ui::new(text, stdout.lock())?.run()?;
 
     Ok(())
 }
 
 #[derive(Debug)]
-struct Editor<'a> {
-    buffer: Vec<String>,
+struct Ui<'a> {
+    source_editor: SourceEditor,
     stdout: io::StdoutLock<'a>,
     width: usize,
     height: usize,
-    row: usize,
-    column: usize,
-    scroll: usize,
     should_exit: bool,
 }
 
-impl<'a> Editor<'a> {
+impl<'a> Ui<'a> {
     fn new(buffer: String, stdout: io::StdoutLock<'a>) -> io::Result<Self> {
         let (width, height) = terminal::size()?;
+        let width = width.into();
+        let height = height.into();
 
         Ok(Self {
-            buffer: buffer.split('\n').map(str::to_string).collect(),
+            source_editor: SourceEditor::new(buffer, width, height),
             stdout,
-            width: width.into(),
-            height: height.into(),
-            row: 0,
-            column: 0,
-            scroll: 0,
+            width,
+            height,
             should_exit: false,
         })
     }
@@ -62,13 +58,9 @@ impl<'a> Editor<'a> {
             cursor::MoveTo(0, 0)
         )?;
 
-        for (idx, line) in self
-            .buffer
-            .iter()
-            .skip(self.scroll)
-            .take(self.height)
-            .enumerate()
-        {
+        let (lines, column, row) = self.source_editor.render();
+
+        for (idx, line) in lines.iter().enumerate() {
             let line = if line.len() < self.width {
                 line
             } else {
@@ -81,10 +73,7 @@ impl<'a> Editor<'a> {
             }
         }
 
-        queue!(
-            self.stdout,
-            cursor::MoveTo(self.column as u16, (self.row - self.scroll) as u16)
-        )?;
+        queue!(self.stdout, cursor::MoveTo(column as u16, row as u16))?;
 
         self.stdout.flush()?;
 
@@ -98,14 +87,14 @@ impl<'a> Editor<'a> {
                     code,
                     modifiers: event::KeyModifiers::NONE,
                 } => match code {
-                    event::KeyCode::Backspace => self.backspace(),
-                    event::KeyCode::Enter => self.enter(),
-                    event::KeyCode::Left => self.left(),
-                    event::KeyCode::Right => self.right(),
-                    event::KeyCode::Up => self.up(),
-                    event::KeyCode::Down => self.down(),
-                    event::KeyCode::Home => self.column = 0,
-                    event::KeyCode::End => self.column = self.buffer[self.row].len(),
+                    event::KeyCode::Backspace => self.source_editor.backspace(),
+                    event::KeyCode::Enter => self.source_editor.enter(),
+                    event::KeyCode::Left => self.source_editor.left(),
+                    event::KeyCode::Right => self.source_editor.right(),
+                    event::KeyCode::Up => self.source_editor.up(),
+                    event::KeyCode::Down => self.source_editor.down(),
+                    event::KeyCode::Home => self.source_editor.home(),
+                    event::KeyCode::End => self.source_editor.end(),
                     event::KeyCode::PageUp => todo!(),
                     event::KeyCode::PageDown => todo!(),
                     event::KeyCode::Tab => todo!(),
@@ -113,7 +102,7 @@ impl<'a> Editor<'a> {
                     event::KeyCode::Delete => todo!(),
                     event::KeyCode::Insert => todo!(),
                     event::KeyCode::F(_) => todo!(),
-                    event::KeyCode::Char(c) => self.keypress(c),
+                    event::KeyCode::Char(c) => self.source_editor.keypress(c),
                     event::KeyCode::Null => {}
                     event::KeyCode::Esc => self.should_exit = true,
                 },
@@ -121,12 +110,13 @@ impl<'a> Editor<'a> {
             },
             event::Event::Mouse(_) => {}
             event::Event::Resize(width, height) => {
-                self.width = width.into();
-                self.height = height.into();
+                let width = width.into();
+                let height = height.into();
+                self.width = width;
+                self.height = height;
+                self.source_editor.resize(width, height);
             }
         }
-
-        self.scroll_to_show_cursor();
 
         std::net::TcpStream::connect("127.0.0.1:9292")
             .unwrap()
@@ -135,16 +125,50 @@ impl<'a> Editor<'a> {
 
         Ok(())
     }
+}
 
-    fn scroll_to_show_cursor(&mut self) {
-        let top_line = self.scroll;
-        let bottom_line = self.scroll + self.height;
+#[derive(Debug)]
+struct SourceEditor {
+    buffer: Vec<String>,
+    width: usize,
+    height: usize,
+    row: usize,
+    column: usize,
+    scroll: usize,
+}
 
-        if self.row < top_line {
-            self.scroll = self.row;
-        } else if self.row >= bottom_line {
-            self.scroll = self.row - self.height + 1;
+impl SourceEditor {
+    fn new(buffer: String, width: usize, height: usize) -> Self {
+        Self {
+            buffer: buffer.split('\n').map(str::to_string).collect(),
+            width,
+            height,
+            row: 0,
+            column: 0,
+            scroll: 0,
         }
+    }
+
+    fn render(&self) -> (Vec<&str>, usize, usize) {
+        let mut lines = Vec::with_capacity(self.height);
+
+        for line in &self.buffer[self.scroll..self.scroll + self.height] {
+            let line = if line.len() < self.width {
+                line
+            } else {
+                &line[..self.width]
+            };
+
+            lines.push(line);
+        }
+
+        (lines, self.column, self.row - self.scroll)
+    }
+
+    fn resize(&mut self, width: usize, height: usize) {
+        self.width = width;
+        self.height = height;
+        self.scroll_to_show_cursor();
     }
 
     fn keypress(&mut self, c: char) {
@@ -175,6 +199,7 @@ impl<'a> Editor<'a> {
         self.row += 1;
         self.buffer.insert(self.row, rest);
         self.column = 0;
+        self.scroll_to_show_cursor();
     }
 
     fn left(&mut self) {
@@ -192,12 +217,31 @@ impl<'a> Editor<'a> {
             self.row -= 1;
         }
         self.clamp_column();
+        self.scroll_to_show_cursor();
     }
     fn down(&mut self) {
         if self.row < self.buffer.len() - 1 {
             self.row += 1;
         }
         self.clamp_column();
+        self.scroll_to_show_cursor();
+    }
+    fn home(&mut self) {
+        self.column = 0;
+    }
+    fn end(&mut self) {
+        self.column = self.buffer[self.row].len();
+    }
+
+    fn scroll_to_show_cursor(&mut self) {
+        let top_line = self.scroll;
+        let bottom_line = self.scroll + self.height;
+
+        if self.row < top_line {
+            self.scroll = self.row;
+        } else if self.row >= bottom_line {
+            self.scroll = self.row - self.height + 1;
+        }
     }
 
     fn clamp_column(&mut self) {
