@@ -47,7 +47,11 @@ impl<'a> Ui<'a> {
     }
 
     fn run(mut self) -> io::Result<()> {
-        queue!(self.stdout, terminal::EnterAlternateScreen)?;
+        queue!(
+            self.stdout,
+            terminal::EnterAlternateScreen,
+            event::EnableMouseCapture
+        )?;
         terminal::enable_raw_mode()?;
 
         while !self.should_exit {
@@ -56,7 +60,11 @@ impl<'a> Ui<'a> {
         }
 
         terminal::disable_raw_mode()?;
-        queue!(self.stdout, terminal::LeaveAlternateScreen)?;
+        queue!(
+            self.stdout,
+            event::DisableMouseCapture,
+            terminal::LeaveAlternateScreen
+        )?;
 
         Ok(())
     }
@@ -103,7 +111,7 @@ impl<'a> Ui<'a> {
 
     fn handle_event(&mut self) -> io::Result<()> {
         match event::read()? {
-            event::Event::Key(key) => match key {
+            event::Event::Key(key_event) => match key_event {
                 event::KeyEvent {
                     code,
                     modifiers: event::KeyModifiers::NONE,
@@ -129,7 +137,16 @@ impl<'a> Ui<'a> {
                 },
                 event::KeyEvent { .. } => {}
             },
-            event::Event::Mouse(_) => {}
+
+            event::Event::Mouse(mouse_event) => match mouse_event.kind {
+                event::MouseEventKind::Down(_) => {}
+                event::MouseEventKind::Up(_) => {}
+                event::MouseEventKind::Drag(_) => {}
+                event::MouseEventKind::Moved => {}
+                event::MouseEventKind::ScrollDown => self.source_editor.scroll_down(),
+                event::MouseEventKind::ScrollUp => self.source_editor.scroll_up(),
+            },
+
             event::Event::Resize(width, height) => {
                 let width = width.into();
                 let height = height.into();
@@ -258,6 +275,33 @@ impl SourceEditor {
     }
     fn end(&mut self) {
         self.column = self.buffer[self.row].len();
+    }
+
+    fn scroll_up(&mut self) {
+        if self.scroll == 0 {
+            return;
+        }
+
+        self.scroll -= 1;
+
+        if self.row > self.scroll + self.height - 1 {
+            self.row = self.scroll + self.height - 1;
+            self.clamp_column();
+        }
+    }
+
+    fn scroll_down(&mut self) {
+        // half height overscroll
+        if self.scroll >= self.buffer.len() - self.height / 2 {
+            return;
+        }
+
+        self.scroll += 1;
+
+        if self.row < self.scroll {
+            self.row = self.scroll;
+            self.clamp_column();
+        }
     }
 
     fn scroll_to_show_cursor(&mut self) {
