@@ -150,16 +150,22 @@ impl SourceEditor {
     }
 
     fn render(&self) -> (Vec<&str>, usize, usize) {
-        let mut lines = Vec::with_capacity(self.height);
+        let mut lines = vec!["~"; self.height];
 
-        for line in &self.buffer[self.scroll..self.scroll + self.height] {
+        for (idx, line) in self
+            .buffer
+            .iter()
+            .skip(self.scroll)
+            .take(self.height)
+            .enumerate()
+        {
             let line = if line.len() < self.width {
                 line
             } else {
                 &line[..self.width]
             };
 
-            lines.push(line);
+            lines[idx] = line;
         }
 
         (lines, self.column, self.row - self.scroll)
