@@ -1,15 +1,21 @@
-use crossterm::{cursor, event, queue, terminal};
+use crossterm::style::Stylize;
+use crossterm::{cursor, event, queue, style, terminal};
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::{env, fs};
 
 fn main() -> io::Result<()> {
-    let text = match env::args().nth(1) {
-        Some(file_to_edit) => fs::read_to_string(file_to_edit)?,
-        None => String::new(),
+    let (path, text) = match env::args().nth(1) {
+        Some(file_to_edit) => {
+            let file_to_edit = PathBuf::from(file_to_edit);
+            let text = fs::read_to_string(&file_to_edit)?;
+            (Some(file_to_edit), text)
+        }
+        None => (None, String::new()),
     };
     let stdout = io::stdout();
 
-    Ui::new(text, stdout.lock())?.run()?;
+    Ui::new(text, path, stdout.lock())?.run()?;
 
     Ok(())
 }
@@ -17,6 +23,7 @@ fn main() -> io::Result<()> {
 #[derive(Debug)]
 struct Ui<'a> {
     source_editor: SourceEditor,
+    file: Option<PathBuf>,
     stdout: io::StdoutLock<'a>,
     width: usize,
     height: usize,
@@ -24,13 +31,14 @@ struct Ui<'a> {
 }
 
 impl<'a> Ui<'a> {
-    fn new(buffer: String, stdout: io::StdoutLock<'a>) -> io::Result<Self> {
+    fn new(buffer: String, file: Option<PathBuf>, stdout: io::StdoutLock<'a>) -> io::Result<Self> {
         let (width, height) = terminal::size()?;
         let width = width.into();
         let height = height.into();
 
         Ok(Self {
-            source_editor: SourceEditor::new(buffer, width, height),
+            source_editor: SourceEditor::new(buffer, width, height - 1),
+            file,
             stdout,
             width,
             height,
@@ -60,18 +68,29 @@ impl<'a> Ui<'a> {
 
         let (lines, column, row) = self.source_editor.render();
 
-        for (idx, line) in lines.iter().enumerate() {
+        for line in lines {
             let line = if line.len() < self.width {
                 line
             } else {
                 &line[..self.width]
             };
 
-            write!(self.stdout, "\r{}", line)?;
-            if idx != self.height - 1 {
-                writeln!(self.stdout)?;
-            }
+            writeln!(self.stdout, "{}\r", line)?;
         }
+
+        let file = match &self.file {
+            Some(file) => file.display().to_string(),
+            None => "[New File]".to_string(),
+        };
+        let status_bar = format!(" {file}{}", " ".repeat(self.width - file.len() - 1));
+        write!(
+            self.stdout,
+            "{}",
+            style::style(status_bar)
+                .bold()
+                .with(style::Color::DarkGrey)
+                .on(style::Color::Black)
+        )?;
 
         queue!(self.stdout, cursor::MoveTo(column as u16, row as u16))?;
 
@@ -114,7 +133,7 @@ impl<'a> Ui<'a> {
                 let height = height.into();
                 self.width = width;
                 self.height = height;
-                self.source_editor.resize(width, height);
+                self.source_editor.resize(width, height - 1);
             }
         }
 
