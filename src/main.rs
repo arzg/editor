@@ -47,6 +47,7 @@ impl<'a> Ui<'a> {
     }
 
     fn run(mut self) -> io::Result<()> {
+        queue!(self.stdout, terminal::EnterAlternateScreen)?;
         terminal::enable_raw_mode()?;
 
         while !self.should_exit {
@@ -55,6 +56,7 @@ impl<'a> Ui<'a> {
         }
 
         terminal::disable_raw_mode()?;
+        queue!(self.stdout, terminal::LeaveAlternateScreen)?;
 
         Ok(())
     }
