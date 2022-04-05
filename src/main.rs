@@ -6,9 +6,20 @@ use std::{env, fs};
 
 fn main() -> io::Result<()> {
     let (path, text) = match env::args().nth(1) {
-        Some(file_to_edit) => {
-            let file_to_edit = PathBuf::from(file_to_edit);
-            let text = fs::read_to_string(&file_to_edit)?;
+        Some(provided_file) => {
+            let file_to_edit = PathBuf::from(provided_file);
+            let text = match fs::read_to_string(&file_to_edit) {
+				Err(e) => {
+					use std::io::ErrorKind;
+					if let ErrorKind::NotFound = e.kind() {
+						fs::File::create(file_to_edit.clone())?;
+						Ok("".into())
+					} else {
+						Err(e)
+					}?
+				}
+				Ok(i) => i
+			};
             (Some(file_to_edit), text)
         }
         None => (None, String::new()),
@@ -156,10 +167,10 @@ impl<'a> Ui<'a> {
             }
         }
 
-        std::net::TcpStream::connect("127.0.0.1:9292")
-            .unwrap()
-            .write_all(format!("\n\n\n\n\n\n\n\n{self:#?}").as_bytes())
-            .unwrap();
+        // std::net::TcpStream::connect("127.0.0.1:9292")
+        //     .unwrap()
+        //     .write_all(format!("\n\n\n\n\n\n\n\n{self:#?}").as_bytes())
+        //     .unwrap();
 
         Ok(())
     }
