@@ -6,8 +6,8 @@ use std::{env, fs};
 
 fn main() -> io::Result<()> {
     let (path, text) = match env::args().nth(1) {
-        Some(provided_file) => {
-            let file_to_edit = PathBuf::from(provided_file);
+        Some(file_to_edit) => {
+            let file_to_edit = PathBuf::from(file_to_edit);
             let text = match fs::read_to_string(&file_to_edit) {
 				Err(e) => {
 					use std::io::ErrorKind;
